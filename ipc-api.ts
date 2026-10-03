@@ -39,6 +39,7 @@ import type { LorebookMappingTemplate } from './lorebook/adapters/mapping'
 import type { LorebookHealthReport } from './lorebook/health'
 import type { TaskSnapshot, EventPage } from './chat-core/events'
 import type { ChatCommand } from './chat-core/commands'
+import type { FactSearchHit } from './domain/semanticFacts'
 
 // ===================== AI 调用接口 =====================
 /** 阶段3：ai:done 结构化完成事件（length 是完成状态；cancelled 由主进程取消时给出） */
@@ -147,6 +148,7 @@ export interface AIAPI {
   }): Promise<GenerationDiagnostics>
   resetGenerationGateProbe(query: Pick<GenerationUsageProfileQuery, 'provider' | 'baseUrl' | 'model'>): Promise<void>
   onChunk(callback: (data: { requestId: string; text: string }) => void): () => void
+  onFeatureDataRestoring?(callback: () => void): () => void
   /** 结构化完成回调（阶段3契约）：携带 finishReason 与 usage，所有完成监听统一走此轨道 */
   onComplete(callback: (payload: AIDonePayload) => void): () => void
   onError(callback: (data: AIErrorPayload) => void): () => void
@@ -286,13 +288,14 @@ export interface MemoryVersionUpdateResult {
 }
 
 export interface ChatAPI {
+  commitFeatureResult(characterId: string, sessionId: string, input: import('./featureSource').FeatureCommit): Promise<boolean>
   listSessions(characterId: string): Promise<SessionPreview[]>
   createSession(characterId: string, title?: string, personaId?: string | null, lorebookIds?: string[]): Promise<ChatSession>
   deleteSession(characterId: string, sessionId: string): Promise<void>
   renameSession(characterId: string, sessionId: string, title: string): Promise<void>
   updateSession(characterId: string, sessionId: string, updates: Record<string, unknown>): Promise<ChatSession>
   /** 在 sessions 文件锁内比较并更新记忆版本，过期写入不会落盘。 */
-  updateSessionIfMemoryVersion(characterId: string, sessionId: string, expectedVersion: number, updates: Record<string, unknown>): Promise<MemoryVersionUpdateResult>
+  updateSessionIfMemoryVersion(characterId: string, sessionId: string, expectedVersion: number, updates: Record<string, unknown>, source?: import('./featureSource').FeatureSource): Promise<MemoryVersionUpdateResult>
   /** 主进程统一执行长记忆总结；automatic=true 时同时检查自动模式与消息间隔。 */
   summarizeMemory(characterId: string, sessionId: string, automatic?: boolean): Promise<import('./chat-core/memorySummary').MemorySummaryResult>
   listMessages(characterId: string, sessionId?: string): Promise<Message[]>
@@ -476,11 +479,8 @@ export interface EmbeddingAPI {
   }): Promise<FactSearchHit[]>
 }
 
-export interface FactSearchHit {
-  text: string
-  index: number
-  score: number
-}
+/** 领域 DTO 权威定义在 shared/domain/semanticFacts.ts；此处再导出以保持 IPC 契约完整 */
+export type { FactSearchHit } from './domain/semanticFacts'
 
 // ===================== 预设接口 =====================
 export interface PresetAPI {
@@ -493,6 +493,7 @@ export interface PresetAPI {
 
 // ===================== 群聊接口 =====================
 export interface GroupChatAPI {
+  commitFeatureResult(groupId: string, sessionId: string, input: import('./featureSource').FeatureCommit): Promise<boolean>
   list(): Promise<GroupChat[]>
   save(group: GroupChat): Promise<void>
   delete(id: string): Promise<void>
@@ -503,6 +504,7 @@ export interface GroupChatAPI {
   listMessages(groupId: string, sessionId: string): Promise<GroupMessage[]>
   saveMessage(groupId: string, sessionId: string, msg: GroupMessage): Promise<void>
   saveMessagesBatch(groupId: string, sessionId: string, msgs: GroupMessage[]): Promise<void>
+  saveTranslation(groupId: string, sessionId: string, messageId: string, expected: { characterId: string; content: string }, translation: string | null): Promise<boolean>
   editMessage(groupId: string, sessionId: string, messageId: string, content: string): Promise<void>
   deleteMessage(groupId: string, sessionId: string, messageId: string): Promise<void>
   clearChat(groupId: string, sessionId?: string): Promise<void>
@@ -512,7 +514,7 @@ export interface GroupChatAPI {
   setMemoryMode(groupId: string, sessionId: string, mode: 'manual' | 'auto', interval?: number): Promise<void>
   updateSession(groupId: string, sessionId: string, updates: Record<string, unknown>): Promise<void>
   /** 群聊会话的原子记忆版本条件更新。 */
-  updateSessionIfMemoryVersion(groupId: string, sessionId: string, expectedVersion: number, updates: Record<string, unknown>): Promise<MemoryVersionUpdateResult>
+  updateSessionIfMemoryVersion(groupId: string, sessionId: string, expectedVersion: number, updates: Record<string, unknown>, source?: import('./featureSource').FeatureSource): Promise<MemoryVersionUpdateResult>
 }
 
 // ===================== TTS 接口 =====================
@@ -990,6 +992,54 @@ export interface AppAPI {
   openExternal(url: string): Promise<void>
 }
 
+/** PC 空间画板：世界定义可复用，运行状态按单聊或群聊会话隔离。 */
+export interface SpatialAPI {
+  setEnabled(characterId: string, sessionId: string, enabled: boolean): Promise<import('./spatial').SpatialSnapshot | null>
+  setGroupEnabled(groupId: string, sessionId: string, enabled: boolean): Promise<import('./spatial').SpatialSnapshot | null>
+  prepareGroupDialogue(groupId: string, sessionId: string, input: import('./spatial-ai').SpatialGroupDialogueCapture): Promise<string | null>
+  groupDialogueSaved(groupId: string, sessionId: string, generationId: string, messageIds: string[]): Promise<void>
+  closeGroupDialogueBatch(groupId: string, sessionId: string, burstId: string): Promise<void>
+  retryGroupDialogue(groupId: string, sessionId: string, taskId: string): Promise<void>
+  groupProposalTargets(groupId: string, sessionId: string): Promise<import('./spatial-ai').SpatialTarget[]>
+  reviewGroupProposal(groupId: string, sessionId: string, proposalId: string, input: import('./spatial-ai').SpatialProposalReviewInput): Promise<import('./spatial-ai').SpatialGroupAiSession>
+  prepareGroupPlace(groupId: string, sessionId: string, proposalId: string, name: string, parentId: string | null): Promise<import('./spatial-ai').SpatialGroupAiSession>
+  undoGroupProposal(groupId: string, sessionId: string, proposalId: string): Promise<{ state: import('./spatial-ai').SpatialGroupAiSession; snapshot: import('./spatial').SpatialSnapshot }>
+  readGroupContext(groupId: string, sessionId: string, targetCharacterId?: string): Promise<import('./spatial').SpatialGroupContext | null>
+  getGroupAiSession(groupId: string, sessionId: string): Promise<import('./spatial-ai').SpatialGroupAiSession>
+  groupInitializationSources(groupId: string, sessionId: string): Promise<import('./spatial-ai').SpatialInitializationSources>
+  askGroupAi(groupId: string, sessionId: string, input: import('./spatial-ai').SpatialAiRequest): Promise<import('./spatial-ai').SpatialGroupAiSession>
+  cancelGroupAi(groupId: string, sessionId: string): Promise<import('./spatial-ai').SpatialGroupAiSession>
+  discardGroupProposal(groupId: string, sessionId: string, proposalId: string): Promise<import('./spatial-ai').SpatialGroupAiSession>
+  editGroupDraft(groupId: string, sessionId: string, proposalId: string, input: import('./spatial').SpatialEditorCommit): Promise<import('./spatial').SpatialCommitResult>
+  applyGroupProposal(groupId: string, sessionId: string, proposalId: string, acknowledgeUnresolved?: boolean): Promise<{ state: import('./spatial-ai').SpatialGroupAiSession; snapshot: import('./spatial').SpatialSnapshot }>
+  loadGroupBound(groupId: string, sessionId: string): Promise<import('./spatial').SpatialSnapshot | null>
+  createGroupAndBind(groupId: string, sessionId: string, name: string): Promise<import('./spatial').SpatialSnapshot>
+  bindGroupWorld(groupId: string, sessionId: string, worldId: string): Promise<import('./spatial').SpatialSnapshot>
+  applyGroupEditorBatch(groupId: string, sessionId: string, input: import('./spatial').SpatialEditorCommit): Promise<import('./spatial').SpatialCommitResult>
+  prepareDialogue(characterId: string, sessionId: string, input: { generationId: string; kind: 'normal' | 'regenerate' | 'continue'; priorMessageId?: string; expectedVersion?: import('./spatial').SpatialVersion }): Promise<string | null>
+  dialogueSaved(characterId: string, sessionId: string, generationId: string, messageId: string): Promise<void>
+  retryDialogue(characterId: string, sessionId: string, taskId: string): Promise<void>
+  readContext(characterId: string, sessionId: string): Promise<import('./spatial').SpatialContext | null>
+  getAiSession(characterId: string, sessionId: string): Promise<import('./spatial-ai').SpatialAiSession>
+  initializationSources(characterId: string, sessionId: string): Promise<import('./spatial-ai').SpatialInitializationSources>
+  askAi(characterId: string, sessionId: string, input: import('./spatial-ai').SpatialAiRequest): Promise<import('./spatial-ai').SpatialAiSession>
+  cancelAi(characterId: string, sessionId: string): Promise<import('./spatial-ai').SpatialAiSession>
+  discardProposal(characterId: string, sessionId: string, proposalId: string): Promise<import('./spatial-ai').SpatialAiSession>
+  proposalTargets(characterId: string, sessionId: string): Promise<import('./spatial-ai').SpatialTarget[]>
+  reviewProposal(characterId: string, sessionId: string, proposalId: string, input: import('./spatial-ai').SpatialProposalReviewInput): Promise<import('./spatial-ai').SpatialAiSession>
+  preparePlace(characterId: string, sessionId: string, proposalId: string, name: string, parentId: string | null): Promise<import('./spatial-ai').SpatialAiSession>
+  undoProposal(characterId: string, sessionId: string, proposalId: string): Promise<{ state: import('./spatial-ai').SpatialAiSession; snapshot: import('./spatial').SpatialSnapshot }>
+  editDraft(characterId: string, sessionId: string, proposalId: string, input: import('./spatial').SpatialEditorCommit): Promise<import('./spatial').SpatialCommitResult>
+  applyProposal(characterId: string, sessionId: string, proposalId: string, acknowledgeUnresolved?: boolean): Promise<{ state: import('./spatial-ai').SpatialAiSession; snapshot: import('./spatial').SpatialSnapshot }>
+  onAiUpdated(listener: (event: { kind?: 'single' | 'group'; characterId?: string; groupId?: string; sessionId: string }) => void): () => void
+  listWorlds(): Promise<Array<{ id: string; name: string; updatedAt: number }>>
+  loadBound(characterId: string, sessionId: string): Promise<import('./spatial').SpatialSnapshot | null>
+  createAndBind(characterId: string, sessionId: string, name: string): Promise<import('./spatial').SpatialSnapshot>
+  bindWorld(characterId: string, sessionId: string, worldId: string): Promise<import('./spatial').SpatialSnapshot>
+  applyEditorBatch(characterId: string, sessionId: string, input: import('./spatial').SpatialEditorCommit): Promise<import('./spatial').SpatialCommitResult>
+  onUpdated(listener: (event: import('./spatial').SpatialUpdatedEvent) => void): () => void
+}
+
 // ===================== 完整 API 契约 =====================
 export interface ChatTaskAPI {
   start(command: ChatCommand): Promise<{ taskId: string; state: string; lastSequence: number }>
@@ -1029,6 +1079,7 @@ export interface ExposedAPI {
   syncLan: SyncLanAPI
   syncCenter: SyncCenterAPI
   app: AppAPI
+  spatial: SpatialAPI
 }
 
 declare global {

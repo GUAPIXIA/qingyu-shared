@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { MemoryFact } from '../../../shared/types'
-import type { FactSearchHit } from '../../../shared/ipc-api'
+import type { FactSearchHit } from '../../../shared/domain/semanticFacts'
 import { buildContextMessagesFromData } from '../contextBuilder'
 import { formatMemoryShadowSummary, type MemoryShadowReport } from '../memoryCandidates'
 import { makeChat, makeData, makeFact, makeMessage, makePreset } from './contextBuildFixtures'

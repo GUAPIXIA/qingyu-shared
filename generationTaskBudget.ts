@@ -29,6 +29,9 @@ export type GenerationTask =
   | 'lorebook_keywords'
   | 'group_reply'
   | 'generic'
+  | 'spatial_initialize'
+  | 'spatial_instruction'
+  | 'spatial_dialogue_sync'
 
 const TASK_BODY_DEFAULTS: Record<GenerationTask, number> = {
   main: 600,
@@ -49,6 +52,9 @@ const TASK_BODY_DEFAULTS: Record<GenerationTask, number> = {
   lorebook_keywords: 600,
   group_reply: 600,
   generic: 600,
+  spatial_initialize: 3200,
+  spatial_instruction: 1200,
+  spatial_dialogue_sync: 900,
 }
 
 export interface GenerationTaskBudgetInput {

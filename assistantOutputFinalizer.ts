@@ -217,7 +217,7 @@ export function finalizeAssistantOutput(input: FinalizeAssistantOutputInput): Fi
 export function mergeTailRepair(input: {
   finalized: FinalizedAssistantOutput
   repairText: string
-  /** 与前缀末尾的重叠去重（src/utils/messagePostProcess 的 trimContinuationOverlap，渲染层注入） */
+  /** 与前缀末尾的重叠去重（shared/chat-core/messagePostProcess 的 trimContinuationOverlap，渲染层注入） */
   trimOverlap: (prev: string, next: string) => string
   finishReason?: AIFinishReason
 }): FinalizedAssistantOutput {

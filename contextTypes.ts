@@ -25,7 +25,7 @@ import type {
   Settings,
   SessionPreview,
 } from './types'
-import type { FactSearchHit } from './ipc-api'
+import type { FactSearchHit } from './domain/semanticFacts'
 
 /** 活跃连接配置（对齐 useSettingsStore.getActiveProfile() 返回值） */
 export interface ActiveProfile {
@@ -88,6 +88,7 @@ export interface ContextBuildData {
   lorebooks: Lorebook[]
   /** 输入/输出正则规则（桥接层组装时同样适用） */
   regexRules: RegexRule[]
+  spatialContext?: import('./spatial').SpatialContext
   /**
    * W1（主计划 §5.3）：该 (provider + 端点 + model + task + gate) 分桶的近期推理样本。
    * 由调用方在构建前预取（渲染层缓存 / 主进程回读）；缺省时预算退回档案默认余量。
@@ -104,6 +105,7 @@ export interface ContextBuildData {
 
 /** 拉取组装数据时的可选项 */
 export interface FetchBuildDataOptions {
+  clientKind?: 'desktop' | 'android'
   /** 预设 ID 覆盖（渲染层传 store 的 activePresetId；主进程缺省时回退角色绑定/设置默认） */
   presetId?: string | null
 }

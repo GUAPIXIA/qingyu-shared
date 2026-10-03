@@ -1,6 +1,4 @@
-import type { ChatParams, ProviderType, Preset, Character, Message, NarrativeMode, ContinueIntensity, ContinueLength } from '../types'
-import type { ReasoningGateDirective } from '../reasoningGate'
-import { resolveGenerationTaskBudget } from '../generationTaskBudget'
+import type { Character, Message, NarrativeMode, ContinueIntensity, ContinueLength } from '../types'
 import { stripThought } from './messagePostProcess'
 import {
   CONTINUE_LENGTH_PARAMS,
@@ -417,95 +415,5 @@ export function buildContinueContext(opts: {
   return contextMessages
 }
 
-/** callAiHelper 的依赖（由 hook 侧注入，模块内不接触 React 状态） */
-export interface AiHelperCallOptions {
-  /** 要发送给模型的完整消息序列。续写依赖最近对话，不能在调用层压缩成首尾两条。 */
-  messages: ChatParams['messages']
-  temperature?: number
-  maxTokens?: number
-  onChunk?: (delta: string, full: string) => void
-  reasoningGate?: ReasoningGateDirective
-  /** 自动预算触顶时允许主进程在端点能力范围内扩大后无损重试。 */
-  adaptiveOutputBudget?: ChatParams['adaptiveOutputBudget']
-  /** 辅助任务观测分类，用于隔离各任务的历史推理样本。 */
-  observability?: ChatParams['observability']
-  /** 截断时返回已产出正文（仅限解析器自身可容错的辅助调用） */
-  profile: { provider: ProviderType; apiKey: string; baseUrl: string }
-  activeModel: string
-  preset: Preset | null
-  /** 活跃请求 ID 集合（用于组件卸载时统一取消） */
-  activeRequestIds: Set<string>
-}
-
-/**
- * 发起一次 AI 辅助请求（非流式），返回 AI 生成的完整文本。
- * 注册 chunk/done/error 监听，完成后自清理。
- */
-export function callAiHelper(opts: AiHelperCallOptions): Promise<string> {
-  const {
-    messages,
-    temperature,
-    maxTokens,
-    onChunk,
-    reasoningGate,
-    adaptiveOutputBudget,
-    observability,
-    profile,
-    activeModel,
-    preset,
-    activeRequestIds,
-  } = opts
-  const automaticPlan = maxTokens == null
-    ? resolveGenerationTaskBudget({ task: 'generic', model: activeModel, userHardCap: preset?.maxTokens })
-    : null
-  let result = ''
-  const requestId = `ai-helper-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-  activeRequestIds.add(requestId)
-
-  return new Promise<string>((resolve, reject) => {
-    const cleanup = () => {
-      activeRequestIds.delete(requestId)
-      unbindChunk(); unbindDone(); unbindError()
-    }
-    // 辅助调用的结果会进入输入框或下游服务，绝不允许 thought-only 回退。
-    const cleanResult = () => stripThought(result)
-    const unbindChunk = window.api.ai.onChunk((data) => {
-      if (data.requestId !== requestId) return
-      result += data.text
-      onChunk?.(data.text, cleanResult())
-    })
-    const unbindDone = window.api.ai.onComplete((payload) => {
-      if (payload.requestId !== requestId) return
-      cleanup()
-      resolve(cleanResult())
-    })
-    const unbindError = window.api.ai.onError((data) => {
-      if (data.requestId !== requestId) return
-      cleanup()
-      reject(new Error(data.error))
-    })
-
-    const params: ChatParams = {
-      requestId,
-      messages,
-      provider: profile.provider,
-      apiKey: profile.apiKey,
-      baseUrl: profile.baseUrl,
-      model: activeModel,
-      temperature: temperature ?? preset?.temperature ?? 0.5,
-      topP: preset?.topP ?? 0.9,
-      maxTokens: maxTokens ?? automaticPlan!.requestMaxTokens,
-      frequencyPenalty: preset?.frequencyPenalty ?? 0,
-      presencePenalty: preset?.presencePenalty ?? 0,
-      stream: false,
-      reasoningGate: reasoningGate ?? automaticPlan?.reasoningGate,
-      adaptiveOutputBudget: adaptiveOutputBudget ?? automaticPlan?.adaptiveOutputBudget,
-      observability,
-    }
-
-    window.api.ai.chat(params).catch((err) => {
-      cleanup()
-      reject(err)
-    })
-  })
-}
+// 阶段 1（2026-10-03）：callAiHelper（window.api.ai 订阅与请求）已迁至
+// src/features/chat/aiHelperClient.ts；本模块只保留纯逻辑，供渲染层/主进程/Android 共用。

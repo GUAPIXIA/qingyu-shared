@@ -2260,47 +2260,5 @@ function resolveInclusionGroups(
   return candidates.filter((candidate) => active.has(candidate))
 }
 
-// ===================== 统一缓存 =====================
-
-const _cache = new Map<string, Lorebook>()
-
-export const lorebookCache = {
-  get(id: string): Lorebook | undefined {
-    return _cache.get(id)
-  },
-
-  getAll(ids: string[]): Lorebook[] {
-    return ids.map(id => _cache.get(id)).filter(Boolean) as Lorebook[]
-  },
-
-  set(id: string, lb: Lorebook): void {
-    _cache.set(id, lb)
-  },
-
-  setAll(lbs: Lorebook[]): void {
-    for (const lb of lbs) _cache.set(lb.id, lb)
-  },
-
-  delete(id: string): void {
-    _cache.delete(id)
-  },
-
-  clear(): void {
-    _cache.clear()
-  },
-
-  /** 批量加载：从 IPC 获取世界书列表并更新缓存。返回匹配 ids 的 Lorebook[]。 */
-  async refresh(ids: string[]): Promise<Lorebook[]> {
-    const all = await window.api.lorebook.list()
-    // 清理不再活跃的条目
-    for (const [cachedId] of _cache) {
-      if (!ids.includes(cachedId)) _cache.delete(cachedId)
-    }
-    // 仅缓存需要的
-    for (const id of ids) {
-      const lb = all.find(b => b.id === id)
-      if (lb) _cache.set(lb.id, lb)
-    }
-    return ids.map(id => _cache.get(id)).filter(Boolean) as Lorebook[]
-  },
-}
+// 阶段 1（2026-10-03）：原「统一缓存」（lorebookCache，含 IPC refresh）已迁至
+// src/features/lorebook/lorebookCache.ts；shared 纯核心不再访问 window.api。

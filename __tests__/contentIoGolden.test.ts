@@ -303,7 +303,8 @@ describe('content-io / 角色卡三跳往返', () => {
     const dir = mkdtempSync(join(tmpdir(), 'qingyu-card-chain-'))
     const cases = [] as Array<Record<string, unknown>>
     for (const entry of CARD_CHAIN_INPUTS) {
-      const cardText = readFileSync(join(__dirname, '..', 'fixtures', 'cross-platform', entry.file), 'utf-8')
+      // Windows checkout 可将样本变为 CRLF；golden 的嵌入文本统一使用 LF。
+      const cardText = readFileSync(join(__dirname, '..', 'fixtures', 'cross-platform', entry.file), 'utf-8').replace(/\r\n/g, '\n')
       const source = join(dir, entry.label + '.in.json')
       writeFileSync(source, cardText, 'utf-8')
       try {

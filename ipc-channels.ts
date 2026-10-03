@@ -6,6 +6,7 @@
 export const IPC_EVENTS = {
   aiChunk: 'ai:chunk',
   aiDone: 'ai:done',
+  featureDataRestoring: 'feature:dataRestoring',
   aiError: 'ai:error',
   aiUsage: 'ai:usage',
   characterImportProgress: 'character:importProgress',

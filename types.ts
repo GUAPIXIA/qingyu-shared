@@ -206,6 +206,8 @@ export interface Character {
 
 /** 聊天消息 */
 export interface Message {
+  /** PC 空间提取的保存检查点；只标记完整成功的正文。 */
+  spatialGenerationId?: string
   id: string
   sessionId: string
   characterId: string
@@ -215,6 +217,9 @@ export interface Message {
   isEditing: boolean
   timestamp: number
   translation?: string | null // 翻译结果（持久化）
+  translationLanguage?: string
+  translationSource?: import('./featureSource').FeatureSource
+  featureTaskIds?: Partial<Record<import('./featureSource').TextFeature, string>>
   /** 所有候选回复（仅 assistant 角色）- Swipe 多候选 */
   swipes?: string[]
   /** 当前显示的候选索引 */
@@ -233,6 +238,7 @@ export interface Message {
   dialogueDirections?: DialogueDirection[]
   /** 方向生成时间戳；用于区分“未生成”与“生成失败后不重试”。 */
   dialogueDirectionsGeneratedAt?: number
+  dialogueDirectionsSource?: import('./featureSource').FeatureSource | null
   /** 本次生成失败/被截断的原因；有值时气泡展示提示行，历史构建只读 content，不进入上下文。 */
   generationError?: string
   /** 阶段3：非失败性的收尾提示（已在完整句处收束/已自动补全结尾/已停止生成）；与 generationError 互斥使用。 */
@@ -341,6 +347,17 @@ export interface ChatSession {
   id: string
   characterId: string
   title: string
+  /** 当前会话的画板开关；缺省关闭，与其他会话独立。 */
+  spatialBoardEnabled?: boolean
+  /** 绑定的空间世界；旧会话缺省表示尚未启用画板。 */
+  spatialWorldId?: string | null
+  /** 当前会话独占的位置运行状态 ID。 */
+  spatialRuntimeId?: string | null
+  spatialContextEnabled?: boolean
+  spatialNarrativeSyncPolicy?: 'off' | 'suggest' | 'auto'
+  /** 主进程维护的读取/同步策略代次，防止在途自动建议被关开开关重新批准。 */
+  spatialNarrativeSyncEpoch?: string
+  spatialAiSessionId?: string | null
   createdAt: number
   updatedAt: number
   memoryEnabled: boolean
@@ -364,14 +381,19 @@ export interface ChatSession {
   memoryLastMessageId?: string | null
   /** 长记忆快照版本；摘要/事实每次成功提交递增 */
   memoryVersion?: number
+  memorySource?: import('./featureSource').FeatureSource | null
+  memoryTaskId?: string
   /** factsVectors 对应的 memoryVersion；不一致时禁止语义检索 */
   factsVectorVersion?: number
   /** 上下文溢出压缩摘要（历史被裁剪时异步压缩的早期内容） */
   compressedSummary?: string | null
   /** 已压缩消息的时间范围（防重复压缩） */
   compressedRange?: { startTs: number; endTs: number } | null
+  compressedSource?: import('./featureSource').FeatureSource | null
+  featureTaskIds?: Partial<Record<import('./featureSource').TextFeature, string>>
   /** 是否已自动生成标题（防重复调用） */
   titleGenerated?: boolean
+  titleRevision?: number
   /** 绑定的用户身份 ID（null 表示不使用身份；undefined 为旧数据，回退 Settings 默认身份） */
   personaId?: string | null
   /** 当前会话选中的世界书 ID 列表。undefined 表示未设置（回退到角色的 boundLorebookIds） */
@@ -403,6 +425,7 @@ export interface ChatSession {
 
 /** 世界书超限压缩缓存条目（会话持久化） */
 export interface LorebookCompressionCacheEntry {
+  taskId?: string
   /** AI 压缩产生的合并摘要（注入时替代被丢弃的条目集合） */
   summary: string
   /** 被压缩条目的定位 key 列表（`${lbId}:${entryId}`） */
@@ -589,6 +612,8 @@ export interface GroupChat {
   currentSpeakerIndex: number
   autoMode: boolean
   chatMode: 'mention' | 'polling' | 'free'
+  /** 主进程维护的成员/发言规则代次；往返修改也使旧剧情批次失效。 */
+  spatialSourceEpoch?: string
   /** 新建群聊会话的默认叙事模式；undefined 表示跟随全局默认值 */
   defaultNarrativeMode?: NarrativeMode
   maxRounds: number
@@ -622,8 +647,14 @@ export interface GroupMessage {
   images: string[]
   timestamp: number
   round: number
+  /** 主进程确认正文完整成功后签入；半截正文没有完成检查点。 */
+  spatialGroupGenerationId?: string
+  spatialGroupComplete?: boolean
   /** 翻译结果 */
   translation?: string | null
+  translationLanguage?: string
+  translationSource?: import('./featureSource').FeatureSource
+  featureTaskIds?: Partial<Record<import('./featureSource').TextFeature, string>>
   /** 是否显示翻译 */
   _showTranslation?: boolean
   /** 字符用量 */
@@ -644,6 +675,7 @@ export interface GroupMessage {
   dialogueDirections?: DialogueDirection[]
   /** 方向生成时间戳；用于区分“未生成”与“生成失败后不重试”。 */
   dialogueDirectionsGeneratedAt?: number
+  dialogueDirectionsSource?: import('./featureSource').FeatureSource | null
   /** 本次生成失败/中断的原因；有值时气泡展示提示行（阶段4与单聊对齐）。 */
   generationError?: string
   /** 阶段4：非失败性收尾提示；与 generationError 互斥使用。 */
@@ -664,12 +696,24 @@ export interface CustomFont {
 
 /** 群聊会话 */
 export interface GroupSession {
+  /** 当前会话的画板开关；缺省关闭，与其他会话独立。 */
+  spatialBoardEnabled?: boolean
   id: string
   groupId: string
   title: string
+  titleGenerated?: boolean
+  titleRevision?: number
   messageCount: number
   createdAt: number
   updatedAt: number
+  /** 世界定义可复用，位置按 groupId + sessionId 隔离；绑定只由空间事务更新。 */
+  spatialWorldId?: string | null
+  spatialRuntimeId?: string | null
+  spatialAiSessionId?: string | null
+  spatialContextEnabled?: boolean
+  spatialNarrativeSyncPolicy?: 'off' | 'suggest'
+  /** 主进程维护的同步、身份和叙事设置代次。 */
+  spatialNarrativeSyncEpoch?: string
   /** 群聊会话实际使用的叙事模式；旧会话缺失时固定回退 immersive */
   narrativeMode?: NarrativeMode
   /** @deprecated 使用 dialogueDirectionsEnabled */
@@ -700,12 +744,16 @@ export interface GroupSession {
   memoryLastMessageId?: string | null
   /** 长记忆快照版本 */
   memoryVersion?: number
+  memorySource?: import('./featureSource').FeatureSource | null
+  memoryTaskId?: string
   /** factsVectors 对应的长记忆版本 */
   factsVectorVersion?: number
   /** 上下文溢出压缩摘要 */
   compressedSummary?: string | null
   /** 已压缩消息的时间范围 */
   compressedRange?: { startTs: number; endTs: number } | null
+  compressedSource?: import('./featureSource').FeatureSource | null
+  featureTaskIds?: Partial<Record<import('./featureSource').TextFeature, string>>
   /** 当前群聊会话绑定的用户身份；null 表示不使用身份，undefined 为旧数据并回退默认身份 */
   personaId?: string | null
   /** 最近 N 轮触发过的世界书条目 key（`${lbId}:${entryId}`），用于 recency 加权。环形缓冲 */
@@ -758,6 +806,8 @@ export interface APIConfig {
 
 /** 应用设置 */
 export interface Settings {
+  /** PC 主进程维护的有效聊天配置代次，不作为功能模型选择项。 */
+  spatialSourceEpoch?: string
   /** 旧版单选 provider 体系遗留字段：仅供 connectionProfiles 迁移读取（useSettingsStore），无其他读写方 */
   providers: Record<ProviderType, Omit<APIConfig, 'apiKey'>>
   /** 新版：多连接 Profile */
@@ -776,6 +826,8 @@ export interface Settings {
   /** 消息宽度（px） */
   messageWidth: number
   streamOutput: boolean
+  /** @deprecated 历史全局开关；画板现在只由 ChatSession / GroupSession 的会话开关控制。 */
+  spatialBoardEnabled?: boolean
   autoScroll: boolean
   /** 新建对话时默认启用长记忆；仅影响后续创建的单聊和群聊 */
   defaultMemoryEnabled?: boolean
@@ -1115,6 +1167,8 @@ export interface QuickReplyStore {
 
 export interface ChatParams {
   requestId: string
+  /** 稳定的对话 ID，供需要会话路由的供应商使用；独立辅助调用可省略。 */
+  sessionId?: string
   messages: { role: 'system' | 'user' | 'assistant'; content: string; images?: string[] }[]
   provider: ProviderType
   apiKey: string
@@ -1138,12 +1192,13 @@ export interface ChatParams {
    * 因而主进程不能越过用户上限重试。
    */
   adaptiveOutputBudget?: import('./generationTaskBudget').AdaptiveOutputBudget
-  /** 阶段0观测元数据：随请求透传给主进程观测层记录，不影响请求行为；缺省视为辅助调用。 */
+  /** 阶段0观测元数据：随请求透传给主进程观测层记录；sessionId 兼作旧调用方的会话路由回退。缺省视为辅助调用。 */
   observability?: {
     source: 'single' | 'group' | 'bridge' | 'aux'
     generationType?: 'normal' | 'continue' | 'impersonate' | 'swipe' | 'regenerate' | 'quiet'
     /** 阶段7（§7.3）：后台结构化任务类型（独立观测口径，不混入主对话篇幅统计） */
     taskType?: import('./generationTaskBudget').GenerationTask
+    featureTask?: { owner: import('./featureSource').FeatureTaskOwner; taskId: string; logicalSessionId: string; sourceRef: import('./featureSource').FeatureSource }
     responseLengthMode?: ResponseLengthMode
     hardMaxChars?: number
     /** W10：规划器为正文/推理分别预留的 token，仅用于脱敏诊断。 */

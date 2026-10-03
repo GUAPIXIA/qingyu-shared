@@ -1,10 +1,13 @@
 /**
  * Token 计数工具
- * 
+ *
  * - `estimateTokens`: 同步启发式估算，用于 UI 即时反馈
- * - `countTokensAccurate`: 异步精确计数（IPC → 主进程 tokenizer）
- * 
- * 安装 tiktoken 后自动切换到精确计数。
+ * - `getDefaultMaxContext` / `formatTokens`: 纯计算辅助
+ *
+ * 阶段 1（2026-10-03）：原 `countTokensAccurate`（经 window.api.ai.countTokens 的 IPC
+ * 精确计数）在清理核对中确认无任何消费者，已移除；共享核心不再访问平台 API。
+ * 主进程自身使用 `electron/services/tokenizer.ts` 的精确计数，渲染层如后续需要，
+ * 由调用方注入计数接口，不在此处直连 IPC。
  */
 
 /** 同步启发式估算（含按模型族的系数优化） */
@@ -29,16 +32,6 @@ export const IMAGE_TOKEN_ESTIMATE = 500
 /** 估算 N 张图片占用的 token 数 */
 export function estimateImageTokens(count: number): number {
   return Math.max(0, count) * IMAGE_TOKEN_ESTIMATE
-}
-
-/** 异步精确计数（走 IPC tokenizer，失败时降级到启发式） */
-export async function countTokensAccurate(text: string, model: string): Promise<number> {
-  try {
-    if (window.api?.ai?.countTokens) {
-      return await window.api.ai.countTokens(text, model)
-    }
-  } catch { /* IPC 失败降级 */ }
-  return estimateTokens(text, model)
 }
 
 /**

@@ -1,3 +1,4 @@
+import { featureSource, featureSessionRef, validCompression, compressionVersion } from '../featureSource'
 /**
  * 阶段 0b：上下文组装纯模块（方案「安卓伴侣端方案」§7 阶段 0b）。
  *
@@ -93,6 +94,8 @@ export interface BuildOptions {
 
 /** 待异步执行的上下文压缩任务（原 markPendingCompression 的入参） */
 export interface PendingCompression {
+  source?: import('../featureSource').FeatureSource
+  expectedCompression?: string
   characterId: string
   sessionId: string
   droppedText: string
@@ -102,6 +105,7 @@ export interface PendingCompression {
 
 /** 组装结果：消息 + 用量记录 + 可选压缩任务 + 世界书触发键/压缩请求（均由调用方写回 store） */
 export interface BuildResult {
+  spatialContext?: Pick<import('../spatial').SpatialContext, 'snapshotId' | 'version' | 'tokens' | 'cropped'>
   messages: ContextMessage[]
   lastContextUsage: { used: number; max: number }
   /** 本轮篇幅策略（session > preset > auto 解析结果，阶段二提示注入复用） */
@@ -369,6 +373,23 @@ export function buildContextMessagesFromData(
     Math.floor(maxContext * 0.25),
   )
 
+  const spatial = currentSession?.spatialContextEnabled !== false ? data.spatialContext : undefined
+  let spatialText = ''
+  let spatialDiagnostics: BuildResult['spatialContext']
+  let spatialRemainingBudget = budgetBase
+  if (spatial) {
+    if (currentSession && (spatial.version.worldId !== currentSession.spatialWorldId || spatial.version.runtimeId !== currentSession.spatialRuntimeId)) throw new Error('空间快照不属于当前会话，请重新读取')
+    if (spatial.characterOffstage && narrativeMode === 'immersive' && opts?.lorebookDiagnosticsMode !== 'preview') throw new Error('当前角色位于“不参与对话”区域，请先调整位置或关闭对话读取位置')
+    const limit = Math.min(budgetBase, maxContext - reservedOutput - 128)
+    const mandatory = estimateTokens(systemContent + (character.description || '') + (messages.filter(message => message.role === 'user').at(-1)?.content || ''), model)
+    if (estimateTokens(spatial.minimalText, model) > 800 || mandatory + estimateTokens(spatial.minimalText, model) > limit) throw new Error('模型上下文不足以保留当前位置与参与规则，请缩小角色设定或提高上下文限制')
+    const fullFits = estimateTokens(spatial.text, model) <= 800 && mandatory + estimateTokens(spatial.text, model) <= limit
+    spatialText = fullFits ? spatial.text : spatial.minimalText
+    spatialDiagnostics = { snapshotId: spatial.snapshotId, version: spatial.version, tokens: estimateTokens(spatialText, model), cropped: [...spatial.cropped, ...(fullFits ? [] : ['空间补充关系：输入预算不足'])] }
+    spatialRemainingBudget = Math.max(0, limit - mandatory - spatialDiagnostics.tokens)
+    noteShadow('current-state', 'spatial:current-position', { text: spatialText, mandatory: true, importance: 1, continuity: 1, origin: 'spatial' })
+  }
+
   // ===== W8 接管（§7.10，G1 通过后）：候选动态分配取代 fitLayeredMemoryBudget 固定上限 =====
   // 注入顺序仍：当前状态 → 关键事实 → 时间线。分配预算 = budgetBase（统一输入池，无 800/10% 专属上限）。
   // 分配/物化异常：回落 fitLayeredMemoryBudget(min(800, budgetBase*0.1))，存储永不删除。
@@ -376,7 +397,7 @@ export function buildContextMessagesFromData(
   let memoryShadowExisting: MemoryInjectionStats | null = null
   let memoryTakeoverSelectedIds: ReadonlySet<string> | null = null
   if (currentSession?.memoryEnabled) {
-    const memoryBudget = Math.min(800, Math.floor(budgetBase * 0.1))
+    const memoryBudget = Math.min(800, Math.floor((spatial ? spatialRemainingBudget : budgetBase) * 0.1))
     const semanticFacts = data.chat.semanticFactsHits
     const factsForInject = semanticFacts.length > 0
       ? semanticFacts.map((hit) => typeof hit === 'string' ? hit : hit.text)
@@ -394,7 +415,7 @@ export function buildContextMessagesFromData(
         semanticScores,
         model,
       })
-      const selectedIds = allocateMemorySelectedIds(plan, budgetBase)
+      const selectedIds = allocateMemorySelectedIds(plan, spatial ? spatialRemainingBudget : budgetBase)
       const materialized = materializeMemoryInjection(
         plan,
         selectedIds,
@@ -547,7 +568,7 @@ export function buildContextMessagesFromData(
     // W9 接管（§7.11 第 3/7 条，G1 通过后）：删除固定比例——世界书与其余块共享 budgetBase，
     // 历史由 cropHistory 吃剩余。lorebookRatio 仍可读（设置兼容），不再参与生产预算。
     void lorebookRatio
-    const lorebookBudget = budgetBase
+    const lorebookBudget = spatial ? Math.max(0, spatialRemainingBudget - estimateTokens(systemContent, model)) : budgetBase
 
     // data.lorebooks 为激活世界书全量（书级/条目级 enabled 由统一执行器内部过滤）；
     // 语义命中为 BudgetLoreItem 形状（携带 score/key 参与统一评分）
@@ -756,7 +777,9 @@ export function buildContextMessagesFromData(
   }
 
   // ===== 历史消息 =====
+  // 当前位置在历史之后注入，裁剪历史前仍需预留一次完整空间预算。
   let usedTokens = context.reduce((sum, c) => sum + estimateTokens(c.content, model), 0)
+    + (spatialText ? estimateTokens(spatialText, model) : 0)
 
   // 预留 postHistoryInstructions（历史之后才注入，需先计入预算，参考群聊路径做法）
   const postHistoryText = character.postHistoryInstructions
@@ -809,7 +832,7 @@ export function buildContextMessagesFromData(
   // 长期时间线已覆盖更早历史时，不再注入或重复生成压缩摘要。
   const hasTimelineMemory = Boolean(currentSession?.memory?.trim())
   if (compression.enabled && !hasTimelineMemory && droppedTokens > 0 && currentSession) {
-    const covered = !!currentSession.compressedSummary
+    const covered = validCompression(currentSession, data.chat.messages) && !!currentSession.compressedSummary
       && !!currentSession.compressedRange
       && droppedStartTs >= currentSession.compressedRange.startTs
       && droppedEndTs <= currentSession.compressedRange.endTs
@@ -828,6 +851,9 @@ export function buildContextMessagesFromData(
           : '',
         droppedStartTs,
         droppedEndTs,
+        source: { ...featureSource(data.chat.messages.filter(m => m.timestamp >= droppedStartTs && m.timestamp <= droppedEndTs), 'range', featureSessionRef(currentSession)),
+          range: { startTs: droppedStartTs, endTs: droppedEndTs }, },
+        expectedCompression: compressionVersion(currentSession),
       }
     }
   }
@@ -882,7 +908,7 @@ export function buildContextMessagesFromData(
       usedTokens,
       budgetTokens: budgetBase,
       model,
-      compressedSummary: compressedSummaryInjected || currentSession?.compressedSummary || null,
+      compressedSummary: compressedSummaryInjected || null,
       compressedRange: currentSession?.compressedRange
         ? {
             startTs: currentSession.compressedRange.startTs,
@@ -951,6 +977,9 @@ export function buildContextMessagesFromData(
     })
   }
 
+  // 设定、开场、历史和后置提示可能含旧位置；本轮已确认快照最后固定当前起点。
+  if (spatialText) context.push({ role: 'system', content: spatialText, keepSeparate: true })
+
   // ===== 续写模式 =====
   // 在 merge/convert 之前注入续写指令，保证指令经过完整消息管线（provider 格式转换）
   if (opts?.continuation) {
@@ -981,6 +1010,18 @@ export function buildContextMessagesFromData(
   }
 
   // 消息后处理：合并连续相同角色消息
+  if (spatial && spatialDiagnostics) {
+    const available = Math.min(budgetBase, maxContext - reservedOutput - 128)
+    let actual = context.reduce((sum, message) => sum + estimateTokens(message.content, model), 0)
+    if (actual > available && spatialText !== spatial.minimalText) {
+      for (const message of context) message.content = message.content.replace(spatialText, spatial.minimalText)
+      spatialDiagnostics.tokens = estimateTokens(spatial.minimalText, model)
+      usedTokens = Math.max(0, usedTokens - estimateTokens(spatialText, model) + spatialDiagnostics.tokens)
+      spatialDiagnostics.cropped.push('空间补充关系：最终输入预算不足')
+      actual = context.reduce((sum, message) => sum + estimateTokens(message.content, model), 0)
+    }
+    if (actual > available) throw new Error('当前上下文无法保留必要位置关系，请减少设定或世界书内容后再发送')
+  }
   let processedContext = mergeConsecutiveMessages(context)
 
   // 根据提供商转换消息格式（Claude/Gemini 需要特殊处理）
@@ -1054,6 +1095,7 @@ export function buildContextMessagesFromData(
   // 记录上下文用量（P1-3：上限预警）
   return {
     messages: processedContext,
+    ...(spatialDiagnostics ? { spatialContext: spatialDiagnostics } : {}),
     lastContextUsage: { used: usedTokens, max: budgetBase },
     responsePolicy: plan.responsePolicy,
     requestMaxTokens: plan.requestMaxTokens,

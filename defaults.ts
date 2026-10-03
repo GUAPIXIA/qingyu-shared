@@ -29,6 +29,7 @@ export function getDefaultSettings(): Settings {
     messageSpacing: 20,
     messageWidth: 768,
     streamOutput: true,
+    spatialBoardEnabled: false,
     autoScroll: true,
     defaultMemoryEnabled: false,
     defaultNarrativeMode: 'immersive',
