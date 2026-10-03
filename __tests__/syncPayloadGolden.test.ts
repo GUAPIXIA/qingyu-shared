@@ -32,8 +32,8 @@ import {
   regexRulePayload,
 } from '../../electron/services/charCard'
 import { personaEntityPayload } from '../../electron/ipc/persona'
-import { messageEntityPayload } from '../../electron/ipc/chat'
-import { sessionEntityPayload } from '../../electron/ipc/chat'
+import { messageEntityPayload } from '../../electron/features/chat/entityMapping'
+import { sessionEntityPayload } from '../../electron/features/chat/entityMapping'
 import { groupEntityPayload } from '../../electron/ipc/group'
 import { presetEntityPayload } from '../../electron/ipc/preset'
 import { ruleEntityPayload } from '../../electron/ipc/regex'
