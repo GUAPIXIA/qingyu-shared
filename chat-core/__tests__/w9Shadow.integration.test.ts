@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { buildContextMessagesFromData } from '../contextBuilder'
+import { messageRef } from '../../../shared/featureSource'
 import type { Lorebook } from '../../../shared/types'
 import {
   CONTENT_MARKERS,
@@ -176,15 +177,16 @@ describe('W9 历史降级与输入审计', () => {
   })
 
   it('带压缩摘要且覆盖裁剪范围：影子侧 replace-with-summary', () => {
+    // 会话隔离特性后，生产注入压缩摘要要求 compressedSource 可核对（validCompression），
+    // 因此 fixture 需按相同口径提供 range 来源，否则摘要注入被正确拒绝。
+    const m1 = makeMessage({ id: 'm1', role: 'user', content: '很久以前发生了很多事情。'.repeat(60), timestamp: 1000 })
+    const m2 = makeMessage({ id: 'm2', role: 'assistant', content: '是的，我们继续走。'.repeat(50), timestamp: 2000 })
+    const m3 = makeMessage({ id: 'm3', role: 'user', content: '现在这一条应该保留。', timestamp: 3000 })
     const data = makeData({
       preset: makePreset({ maxContext: 2048, maxTokens: 256 }),
       settings: { settings: makeSettings(), profile: null },
       chat: makeChat({
-        messages: [
-          makeMessage({ id: 'm1', role: 'user', content: '很久以前发生了很多事情。'.repeat(60), timestamp: 1000 }),
-          makeMessage({ id: 'm2', role: 'assistant', content: '是的，我们继续走。'.repeat(50), timestamp: 2000 }),
-          makeMessage({ id: 'm3', role: 'user', content: '现在这一条应该保留。', timestamp: 3000 }),
-        ],
+        messages: [m1, m2, m3],
         sessions: [
           {
             id: 's1',
@@ -199,6 +201,11 @@ describe('W9 历史降级与输入审计', () => {
             memoryUpdatedAt: 3500,
             compressedSummary: '早期摘要：两人进入废土城市并躲避沙尘暴。',
             compressedRange: { startTs: 0, endTs: 2500 },
+            compressedSource: {
+              messages: [messageRef(m1), messageRef(m2)],
+              mode: 'range',
+              range: { startTs: 0, endTs: 2500 },
+            },
             messageCount: 3,
             lastMessage: '现在这一条应该保留。',
           },
