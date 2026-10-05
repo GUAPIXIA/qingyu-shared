@@ -10,6 +10,16 @@ export const IPC_EVENTS = {
   aiError: 'ai:error',
   aiUsage: 'ai:usage',
   characterImportProgress: 'character:importProgress',
+  /**
+   * F3：角色数据被主进程侧写入（含外部 IPC 调用）后广播，渲染层据此重新拉取角色列表。
+   * 与 session:updated 同理：外部 Agent 写入不应要求用户重启应用才能看到。
+   */
+  characterChanged: 'character:changed',
+  /**
+   * F3：设置被主进程侧写入（含外部 IPC 调用）后广播。
+   * 渲染层仅在本地无未保存改动（_dirty=false）时重新加载，避免与 F1 的写回竞争。
+   */
+  settingsChanged: 'settings:changed',
   // UEX-P1-28：世界书语义索引逐条目进度
   lorebookIndexProgress: 'embedding:indexProgress',
   // 阶段 0c：会话变更事件总线

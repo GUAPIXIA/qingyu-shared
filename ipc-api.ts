@@ -246,11 +246,11 @@ export interface CharacterAPI {
   save(character: Character): Promise<void>
   delete(id: string): Promise<void>
   /** UEX-P1-17：conflict 为同名冲突策略（默认另存副本）；相同卡跳过时无 character，仅回传 outcome/note 明细 */
-  importPng(conflict?: CharacterImportConflictPolicy): Promise<{ success: boolean; character?: Character; error?: string; canceled?: boolean; cardExtras?: { regexCount: number; quickReplyCount: number; skipped?: string[] }; lorebookSuggestions?: LorebookSuggestion[]; outcome?: CharacterImportOutcome; note?: string }>
+  importPng(conflict?: CharacterImportConflictPolicy, sourcePath?: string): Promise<{ success: boolean; character?: Character; error?: string; canceled?: boolean; cardExtras?: { regexCount: number; quickReplyCount: number; skipped?: string[] }; lorebookSuggestions?: LorebookSuggestion[]; outcome?: CharacterImportOutcome; note?: string }>
   /** UEX-P1-17：conflict 为同名冲突策略（默认另存副本）；相同卡跳过时无 character，仅回传 outcome/note 明细 */
-  importJson(conflict?: CharacterImportConflictPolicy): Promise<{ success: boolean; character?: Character; error?: string; canceled?: boolean; needAvatar?: boolean; cardExtras?: { regexCount: number; quickReplyCount: number; skipped?: string[] }; lorebookSuggestions?: LorebookSuggestion[]; outcome?: CharacterImportOutcome; note?: string }>
+  importJson(conflict?: CharacterImportConflictPolicy, sourcePath?: string): Promise<{ success: boolean; character?: Character; error?: string; canceled?: boolean; needAvatar?: boolean; cardExtras?: { regexCount: number; quickReplyCount: number; skipped?: string[] }; lorebookSuggestions?: LorebookSuggestion[]; outcome?: CharacterImportOutcome; note?: string }>
   /** UEX-P1-17：conflict 为同名冲突策略（默认另存副本）；批内重复按同策略去重（批内相同 → 跳过） */
-  importBatch(conflict?: CharacterImportConflictPolicy): Promise<{
+  importBatch(conflict?: CharacterImportConflictPolicy, sourcePaths?: string[]): Promise<{
     success: boolean
     results?: { name: string; success: boolean; error?: string; needAvatar?: boolean; outcome?: CharacterImportOutcome; note?: string }[]
     total?: number
@@ -272,11 +272,11 @@ export interface CharacterAPI {
   importBatchCancel(): Promise<void>
   bindLorebook(characterId: string, lorebookId: string | null): Promise<void>
   /** UEX-P1-18：导出结果回传 { ok, path?/error? }，UI 据此提示成功路径或失败原因 */
-  exportPng(id: string): Promise<CharacterExportResult>
+  exportPng(id: string, targetPath?: string): Promise<CharacterExportResult>
   /** UEX-P1-18：导出结果回传 { ok, path?/error? }，UI 据此提示成功路径或失败原因 */
-  exportJson(id: string): Promise<CharacterExportResult>
+  exportJson(id: string, targetPath?: string): Promise<CharacterExportResult>
   /** 将角色封面导出为独立图片文件；无封面时返回 ok:false */
-  exportCover(id: string): Promise<{ ok: boolean; canceled?: boolean; error?: string }>
+  exportCover(id: string, targetPath?: string): Promise<{ ok: boolean; canceled?: boolean; error?: string; path?: string }>
   reloadAvatar(characterId: string, url: string): Promise<{ success: boolean; avatar: string; error?: string; code?: string }>
   onImportProgress(callback: (data: { current: number; total: number; fileName: string; status: 'processing' | 'done' | 'error' }) => void): () => void
 }
@@ -325,8 +325,8 @@ export interface SettingsAPI {
   save(settings: Settings): Promise<void>
   saveAPICredential(provider: string, key: string): Promise<void>
   getAPICredential(provider: string): Promise<string | null>
-  exportBackup(): Promise<{ status: 'canceled' | 'success'; path?: string; version?: 1 | 2; counts?: Record<string, number>; totalBytes?: number; excluded?: string[] }>
-  importBackup(): Promise<{ status: 'canceled' | 'success'; version?: 1 | 2; counts?: Record<string, number> }>
+  exportBackup(targetPath?: string): Promise<{ status: 'canceled' | 'success'; path?: string; version?: 1 | 2; counts?: Record<string, number>; totalBytes?: number; excluded?: string[] }>
+  importBackup(sourcePath?: string): Promise<{ status: 'canceled' | 'success'; version?: 1 | 2; counts?: Record<string, number> }>
 }
 
 // ===================== 世界书接口 =====================
@@ -365,9 +365,9 @@ export interface LorebookAPI {
   save(lorebook: Lorebook, expectedRevision?: number): Promise<{ revision: number }>
   delete(id: string): Promise<void>
   /** 阶段 2：返回格式检测与兼容性报告；格式歧义时返回 LorebookFormatChoicePending 而不是静默猜测。 */
-  importJsonDetailed(options?: LorebookImportOptions): Promise<LorebookImportOutcome | null>
+  importJsonDetailed(options?: LorebookImportOptions, sourcePath?: string): Promise<LorebookImportOutcome | null>
   /** 阶段 6 P2：映射向导。打开文件并返回截断预览与猜测模板；原始内容缓存在主进程。 */
-  openMappingSource(): Promise<{
+  openMappingSource(sourcePath?: string): Promise<{
     sourceId: string
     fileName: string
     preview: unknown
@@ -379,7 +379,7 @@ export interface LorebookAPI {
   listMappingTemplates(): Promise<LorebookMappingTemplate[]>
   saveMappingTemplate(template: LorebookMappingTemplate): Promise<void>
   deleteMappingTemplate(id: string): Promise<void>
-  exportJson(id: string, adapterId?: string): Promise<{
+  exportJson(id: string, adapterId?: string, targetPath?: string): Promise<{
     ok: boolean
     canceled?: boolean
     path?: string
@@ -397,9 +397,9 @@ export interface QuickReplyAPI {
   /** 删除指定角色的专属快捷回复 */
   clearCharacter(characterId: string): Promise<void>
   /** 导出 JSON 到文件 */
-  exportJson(): Promise<{ ok: boolean; canceled?: boolean; error?: string }>
+  exportJson(targetPath?: string): Promise<{ ok: boolean; canceled?: boolean; error?: string; path?: string }>
   /** 从 JSON 文件导入（合并；replacedGlobal/importedGlobal 为覆盖明细，供 UI 反馈） */
-  importJson(): Promise<{ ok: boolean; canceled?: boolean; error?: string; replacedGlobal?: number; importedGlobal?: number }>
+  importJson(sourcePath?: string): Promise<{ ok: boolean; canceled?: boolean; error?: string; replacedGlobal?: number; importedGlobal?: number }>
 }
 
 // ===================== 语义触发（向量 RAG）接口 =====================
@@ -487,8 +487,8 @@ export interface PresetAPI {
   list(): Promise<Preset[]>
   save(preset: Preset): Promise<Preset>
   delete(id: string): Promise<void>
-  importJson(): Promise<PresetImportResult | null>
-  exportJson(id: string): Promise<{ ok: boolean; canceled?: boolean; error?: string }>
+  importJson(sourcePath?: string): Promise<PresetImportResult | null>
+  exportJson(id: string, targetPath?: string): Promise<{ ok: boolean; canceled?: boolean; error?: string; path?: string }>
 }
 
 // ===================== 群聊接口 =====================
@@ -820,6 +820,10 @@ export interface SessionSyncAPI {
   changed(payload: SessionChangePayload): void
   /** 订阅主进程广播的会话变更（PC 双窗口同步 / 桥接层事件源） */
   onUpdated(callback: (payload: SessionChangePayload) => void): () => void
+  /** F3：订阅主进程侧（含外部 IPC）角色数据写入广播 */
+  onCharactersChanged(callback: () => void): () => void
+  /** F3：订阅主进程侧（含外部 IPC）设置写入广播 */
+  onSettingsChanged(callback: () => void): () => void
 }
 
 // ===================== 桥接层接口（/sync/v1 服务生命周期） =====================
