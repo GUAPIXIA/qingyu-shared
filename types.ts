@@ -974,8 +974,8 @@ export interface AuthorNoteConfig {
 export interface TTSModelConfig {
   id: string
   name: string
-  /** system = Windows 系统语音（System.Speech）；openai = OpenAI 兼容 TTS（/audio/speech）；'edge' 为旧值，加载时迁移为 system */
-  provider: 'system' | 'openai' | 'edge'
+  /** system = Windows 系统语音（System.Speech）；openai = OpenAI 兼容 TTS（/audio/speech）；xiaomi = 小米 MiMo TTS（/chat/completions + audio）；'edge' 为旧值，加载时迁移为 system */
+  provider: 'system' | 'openai' | 'edge' | 'xiaomi'
   model: string
   voice: string
   apiKey: string
@@ -1098,7 +1098,8 @@ export interface VisionModelConfig {
 
 /** TTS 选项 */
 export interface TTSOptions {
-  provider: 'system' | 'openai' | 'edge'
+  /** system = 本机系统语音；openai = OpenAI 兼容 /audio/speech；xiaomi = 小米 MiMo /chat/completions + audio */
+  provider: 'system' | 'openai' | 'edge' | 'xiaomi'
   voice: string
   rate: number
 }
