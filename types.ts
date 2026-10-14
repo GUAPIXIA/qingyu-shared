@@ -843,8 +843,6 @@ export interface Settings {
   reasoningEffort?: 'auto' | import('./reasoningGate').ReasoningGateLevel
   /** W10：provider length 且正文没有稳定收尾时是否允许一次自动补尾。 */
   autoTailRepairEnabled?: boolean
-  /** W10：在界面展示预算/费用风险提醒；不绕过硬安全校验。 */
-  costReminderEnabled?: boolean
   /** 全局叙事模式的自定义规则模板；支持 {{user}} / {{char}}，空值时使用内置规则。 */
   omniscientNarrativeRules?: string
   // TTS 多模型配置

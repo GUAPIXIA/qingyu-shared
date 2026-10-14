@@ -38,7 +38,6 @@ export function getDefaultSettings(): Settings {
     defaultResponseLength: 'auto',
     reasoningEffort: 'auto',
     autoTailRepairEnabled: true,
-    costReminderEnabled: true,
     ttsEnabled: false,
     ttsModels: [],
     activeTTSModelId: null,
