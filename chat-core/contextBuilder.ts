@@ -43,6 +43,7 @@ import {
   TOKEN_BUDGET_SAFETY,
 } from './chatConstants'
 import { cropHistory, applyDepthInserts, type DepthInsertItem } from './contextShared'
+import { buildUserPersonaBlock } from './userPersonaBlock'
 import type { ContextMessage } from './chatTypes'
 import {
   createContextShadowCollector,
@@ -317,6 +318,7 @@ export function buildContextMessagesFromData(
   })
 
   // 用户人设注入（可配置：开关 / 位置 / 字段，对齐 ST 的 persona placement）
+  // 标题 / 正文 / 使用规则由 shared/chat-core/userPersonaBlock.ts 统一产出，禁止就地拼接。
   const personaInjection = settings.personaInjection
     ?? { enabled: true, position: 'system' as const, includeDescription: true, includePersona: true }
   let personaText = ''
@@ -329,10 +331,7 @@ export function buildContextMessagesFromData(
     if (personaInjection.includePersona !== false && settings.userPersona) {
       personaText += '\n性格：' + replaceVariables(settings.userPersona, userName, charNameForVars)
     }
-    if (personaText) {
-      personaBlock = `【用户人设】\n${personaText}\n\n【用户身份使用规则】
-将上述身份视为既定事实：在角色可知且与当前情境相关时，以称呼、判断、态度和反应自然体现；不得忽略、改写、擅自补全或生成冲突信息，也不得替用户说话、行动、思考、感受或决定。`
-    }
+    personaBlock = buildUserPersonaBlock(personaText)
     if (personaBlock && personaInjection.position === 'system') {
       systemContent += '\n\n' + personaBlock
     }

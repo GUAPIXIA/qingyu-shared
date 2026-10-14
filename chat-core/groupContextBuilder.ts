@@ -29,6 +29,7 @@ import { resolveEffectiveTemplate } from './chatTemplates'
 import { fitLayeredMemoryBudget, formatMemoryFacts } from './memory'
 import { estimateTokens, estimateImageTokens } from './tokenCounter'
 import { cropHistory, applyDepthInserts, type DepthInsertItem } from './contextShared'
+import { buildUserPersonaBlock } from './userPersonaBlock'
 import { TOKEN_BUDGET_SAFETY } from './chatConstants'
 import {
   buildFreeMemberCards,
@@ -284,8 +285,10 @@ export function buildGroupContextMessagesFromData(
     charNameForVars,
     injection: input.personaInjection,
   })
-  if (personaText && (input.personaInjection?.position ?? 'system') === 'system') {
-    systemContent += '\n【用户人设】\n' + personaText
+  // 完整注入块（标题 + 正文 + 【用户身份使用规则】）：与单聊同源，禁止只拼正文。
+  const personaBlock = buildUserPersonaBlock(personaText)
+  if (personaBlock && (input.personaInjection?.position ?? 'system') === 'system') {
+    systemContent += '\n' + personaBlock
   }
 
   // ---- 9. 世界书 at_end ----
@@ -377,8 +380,8 @@ export function buildGroupContextMessagesFromData(
   for (const content of plan.authorsNoteTop ?? []) {
     context.push({ role: 'system', content, keepSeparate: true })
   }
-  if (personaText && input.personaInjection?.position === 'separate') {
-    context.push({ role: 'system', content: '【用户人设】\n' + personaText, keepSeparate: true })
+  if (personaBlock && input.personaInjection?.position === 'separate') {
+    context.push({ role: 'system', content: personaBlock, keepSeparate: true })
   }
 
   const historyContext: GroupContextMessageOut[] = []
