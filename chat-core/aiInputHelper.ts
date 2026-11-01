@@ -246,12 +246,47 @@ export function buildLengthRepairInstruction(
 ): string {
   const { minChars, maxChars } = CONTINUE_LENGTH_PARAMS[length]
   if (mode === 'compress') {
-    return `上一次输出约 ${opts.chars} 个可见字符，超出本次目标 ${minChars}–${maxChars} 字。请压缩重写：保留关键信息与因果，删去重复、铺陈与次要细节，必须在目标区间内以完整句收尾。`
+    return `上一次输出约 ${opts.chars} 个可见字符，超出本次目标 ${minChars}–${maxChars} 字。请压缩重写：保留关键信息与因果，删去重复、铺陈与次要细节，必须在目标区间内以完整句收尾。只写用户自己的动作、对白、观察和感受，不得叙述角色的动作、对白或心理。`
   }
   const truncatedNote = opts.truncated
     ? '上一次输出未能写完就中断了。'
     : `上一次输出约 ${opts.chars} 个可见字符，低于本次目标 ${minChars}–${maxChars} 字。`
-  return `${truncatedNote}请补足到目标区间（${minChars}–${maxChars} 个可见字符），以完整句收尾；不要复述已有内容，也不要增加无关支线。`
+  const deficit = Math.max(1, minChars - opts.chars)
+  return `${truncatedNote}请补足到目标区间（${minChars}–${maxChars} 个可见字符）并扩写本次新增内容：至少写到 ${minChars} 个可见中文字符，当前还差至少 ${deficit} 字；补充用户自己的具体动作、对白、观察或感官细节，保持在当前场景与因果内，不要复述已有内容，不要新增无关支线，必须在完整句处收尾。只写用户自己的动作、对白、观察和感受，不得叙述角色的动作、对白或心理。`
+}
+
+/**
+ * 沉浸式续写的“替角色行动/说话”检测：角色名作主语或直接给角色名加对白前缀，
+ * 说明模型把角色侧内容写进了用户消息（应只写用户侧）。
+ */
+export function detectCharacterVoiceViolation(text: string, charName: string): boolean {
+  const name = charName.trim()
+  if (!name) return false
+  const escaped = escapeRegExp(name)
+  const subject = new RegExp(
+    `${escaped}\\s*(没|也|还|才|已|只|正|忽然|轻轻|低声|抬|低|站|坐|看|转|皱|笑|伸|收|叹|说|问|答|点头|摇头|把|将|的)`,
+  )
+  const dialog = new RegExp(`${escaped}\\s*[：:]\\s*[“"]`)
+  return subject.test(text) || dialog.test(text)
+}
+
+/** 续写越权修复指令：只写用户侧内容，不得替角色行动或说话。 */
+export function buildVoiceRepairInstruction(charName: string): string {
+  return `上一次续写替 ${charName} 行动或说话了。你只能以用户身份输出用户自己的动作、对白、观察和感受；不得以 ${charName} 的名字或“她/他”为主语叙述其动作、表情、对白或心理，也不得替 ${charName} 做决定。请重写本次新增内容，保持原定篇幅目标，只写用户侧内容。`
+}
+
+/**
+ * 兜底清理：按句删除“替角色行动/说话”的句子（角色名作主语/角色对白前缀）。
+ * 仅在两次视角重写后仍检测到越权时使用；可能损失部分细节，但保证用户消息不含角色侧叙述。
+ */
+export function stripCharacterVoiceSentences(text: string, charName: string): string {
+  const name = charName.trim()
+  if (!name) return text
+  const sentences = text.split(/(?<=[。！？!?])/).filter((s) => s.length > 0)
+  if (sentences.length <= 1) return text
+  const kept = sentences.filter((s) => !detectCharacterVoiceViolation(s, name))
+  if (!kept.length) return text
+  return kept.join('').trim()
 }
 
 /**
@@ -295,10 +330,20 @@ function continueLengthClause(length: ContinueLength, hasInput: boolean): string
   const lead = hasInput
     ? '本次只输出直接接在原文之后的新内容，不要复述原文'
     : '本次只输出用户接下来要说的新内容'
+  // 每段字数提示：把“自然段结构”落成可执行的分段配额，模型更容易写到达标。
+  const paragraphHint = length === 'extended'
+    ? '每段约 110–160 字'
+    : length === 'detailed'
+      ? '每段约 90–140 字'
+      : length === 'standard'
+        ? '整段约 80–180 字'
+        : '1–2 句即可'
   return `- 篇幅由本指令控制：${lead}，写 ${minChars}–${maxChars} 个可见中文字符，${structure}
+- 硬性下限：本次新增内容必须达到至少 ${minChars} 个可见中文字符；未达到下限前不要收尾，用同一场景内的用户动作、对白、观察或感官细节补足
+- 分段节奏：${structure}，${paragraphHint}；每段都要有实质内容，不要用一句话占一段
 - 一次把目标篇幅写完，不要只写开头就收尾，也不要大幅超出上限
 - 必须在完整句处结束，不要为了凑字数重复信息
-- 如果情节已经自然完成，宁可接近下限，也不得增加无关支线`
+- 达到下限后，才允许在自然完成处收尾；若情节已自然完成但字数不足，仍须在同一场景内补足到下限，不得新开支线`
 }
 
 /** 接续点约束：专门防止末尾复读、时序倒置和无输入时绕开当前悬念。 */
@@ -346,10 +391,12 @@ ${continuityClause}
   }
 
   const scope = immersiveScopeClause(intensity)
+  const voiceClause = `- 只写用户自己的动作、对白、观察和感受；不得叙述 ${charName} 的动作、表情、对白或心理，不得以 ${charName} 或“她/他”为主语展开角色行为
+- 需要提到 ${charName} 时，只能作为用户观察、倾听或对话的对象（例如“我看了她一眼”“我对她说”），不得替她行动、说话或做决定`
   if (hasInput) {
-    return `你是一个角色扮演对话的用户视角续写助手。你的任务是以【用户 ${userName}】的身份和口吻，续写用户未完成的消息。\n\n严格要求：\n- 必须使用简体中文输出\n- 只输出 ${userName} 的话语，绝对不要输出 ${charName} 的话语\n- 不要以 ${charName} 的身份说话或行动\n- 不要包含角色名前缀，直接输出对话内容\n- 保持用户一贯的语气和风格\n${scope}\n${lengthClause}\n${continuityClause}\n- 最终正文必须且只能放在一组 <continuation>...</continuation> 标签内，标签外不要输出任何内容`
+    return `你是一个角色扮演对话的用户视角续写助手。你的任务是以【用户 ${userName}】的身份和口吻，续写用户未完成的消息。\n\n严格要求：\n- 必须使用简体中文输出\n- 只输出 ${userName} 的话语，绝对不要输出 ${charName} 的话语\n- 不要以 ${charName} 的身份说话或行动\n- 不要包含角色名前缀，直接输出对话内容\n- 保持用户一贯的语气和风格\n${voiceClause}\n${scope}\n${lengthClause}\n${continuityClause}\n- 最终正文必须且只能放在一组 <continuation>...</continuation> 标签内，标签外不要输出任何内容`
   }
-  return `你是一个角色扮演对话的用户视角续写助手。你的任务是以【用户 ${userName}】的身份和口吻，生成一条合适的用户回复。\n\n严格要求：\n- 必须使用简体中文输出\n- 只输出 ${userName} 的话语，绝对不要输出 ${charName} 的话语\n- 不要以 ${charName} 的身份说话或行动\n- 不要包含角色名前缀，直接输出对话内容\n- 保持用户一贯的语气和风格\n${scope}\n${lengthClause}\n${continuityClause}\n- 最终正文必须且只能放在一组 <continuation>...</continuation> 标签内，标签外不要输出任何内容`
+  return `你是一个角色扮演对话的用户视角续写助手。你的任务是以【用户 ${userName}】的身份和口吻，生成一条合适的用户回复。\n\n严格要求：\n- 必须使用简体中文输出\n- 只输出 ${userName} 的话语，绝对不要输出 ${charName} 的话语\n- 不要以 ${charName} 的身份说话或行动\n- 不要包含角色名前缀，直接输出对话内容\n- 保持用户一贯的语气和风格\n${voiceClause}\n${scope}\n${lengthClause}\n${continuityClause}\n- 最终正文必须且只能放在一组 <continuation>...</continuation> 标签内，标签外不要输出任何内容`
 }
 
 /** 全局叙事末条指令的推进幅度措辞；active 档保持强度功能引入前的原文案。 */
