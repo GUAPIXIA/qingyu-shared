@@ -28,6 +28,8 @@ export type GenerationTask =
   | 'image_prompt_translation'
   | 'lorebook_keywords'
   | 'group_reply'
+  | 'group_init'
+  | 'group_opening'
   | 'generic'
   | 'spatial_initialize'
   | 'spatial_instruction'
@@ -51,6 +53,8 @@ const TASK_BODY_DEFAULTS: Record<GenerationTask, number> = {
   image_prompt_translation: 256,
   lorebook_keywords: 600,
   group_reply: 600,
+  group_init: 700,
+  group_opening: 900,
   generic: 600,
   spatial_initialize: 3200,
   spatial_instruction: 1200,

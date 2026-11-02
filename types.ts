@@ -604,6 +604,18 @@ export interface PresetImportResult {
   unsupportedFields: string[]
 }
 
+/** 群聊初始化前置设定：AI 分析成员卡后生成的共同场景提示词（群级，PC 本地数据）。 */
+export interface GroupPreamble {
+  /** 注入系统提示的正文（不含标题/指令外壳）；trim 后为空视为已清除 */
+  text: string
+  /** 生成时群成员快照；用于成员变化后的“建议重新生成”提示 */
+  memberIds: string[]
+  /** 生成/最后编辑时间 */
+  updatedAt: number
+  /** 生成模型（仅诊断用；手写时保留上次值或省略） */
+  model?: string
+}
+
 /** 群聊 */
 export interface GroupChat {
   id: string
@@ -621,6 +633,8 @@ export interface GroupChat {
   lorebookIds: string[]
   presetId: string | null
   systemPrompt: string
+  /** 群聊初始化前置设定：AI 分析成员卡后生成的共同场景提示词 */
+  groupPreamble?: GroupPreamble
   createdAt: number
   updatedAt: number
   /** 聊天背景图（base64） */

@@ -2189,7 +2189,12 @@ const TASK_BODY_DEFAULTS_FOR_FIXTURE: Record<string, number> = {
   image_prompt_translation: 256,
   lorebook_keywords: 600,
   group_reply: 600,
+  group_init: 700,
+  group_opening: 900,
   generic: 600,
+  spatial_initialize: 3200,
+  spatial_instruction: 1200,
+  spatial_dialogue_sync: 900,
 }
 
 const PROFILE_MODELS: string[] = [

@@ -4,7 +4,7 @@ import type { DialogueDirection, Message, GroupMessage, LorebookCompressionCache
 export type FeatureOwner = { kind: 'single'; characterId: string; sessionId: string } | { kind: 'group'; groupId: string; sessionId: string }
 export type EditorOwner = { kind: 'editor'; editor: string; objectId: string; instanceId: string }
 export type FeatureTaskOwner = FeatureOwner | EditorOwner
-export type TextFeature = 'translation' | 'direction' | 'title' | 'compression' | 'memory' | 'editing'
+export type TextFeature = 'translation' | 'direction' | 'title' | 'compression' | 'memory' | 'editing' | 'group_init' | 'group_opening'
 export interface FeatureMessageRef { id: string; fingerprint: string }
 export interface FeatureSource {
   messages: FeatureMessageRef[]
