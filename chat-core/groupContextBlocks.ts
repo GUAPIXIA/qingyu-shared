@@ -172,10 +172,17 @@ export interface GroupHistoryEntry {
 }
 
 /**
+ * 系统开场旁白消息的保留 `characterId`：不属于任何群成员。
+ * 历史归属按「旁白」处理，不做成员名替换，避免落成「未知角色」。
+ */
+export const GROUP_NARRATOR_CHARACTER_ID = '__narrator__'
+
+/**
  * 历史消息 → prompt 消息的归属标注（语义钉子）：
  * - 空正文整条跳过；
  * - 用户消息：变量替换后**无名字前缀**，图片随消息；
- * - 角色消息：前缀 `【成员名|未知角色】`，变量替换用该**发言者名**做 charName。
+ * - 角色消息：前缀 `【成员名|未知角色】`，变量替换用该**发言者名**做 charName；
+ * - 系统开场旁白（`__narrator__`）：前缀 `【旁白】`，`{{char}}` 用全体成员名拼接替换。
  */
 export function mapGroupHistoryMessages(input: {
   messages: readonly GroupHistoryMessage[]
@@ -184,23 +191,25 @@ export function mapGroupHistoryMessages(input: {
   charNameForVars: string
 }): GroupHistoryEntry[] {
   const out: GroupHistoryEntry[] = []
+  const memberNames = input.members.map((member) => member.name).filter(Boolean).join('、')
   for (const m of input.messages) {
     if (!m.content || !m.content.trim()) continue
-    const char = input.members.find((c) => c.id === m.characterId)
-    const speaker = m.characterId === '__user__' ? input.userName : (char?.name || '未知角色')
     if (m.characterId === '__user__') {
-      const entry: GroupHistoryEntry = {
+      out.push({
         role: 'user',
         content: replaceVariables(m.content, input.userName, input.charNameForVars),
-      }
-      if (m.images && m.images.length > 0) entry.images = [...m.images]
-      out.push(entry)
-    } else {
-      out.push({
-        role: 'assistant',
-        content: `【${speaker}】${replaceVariables(m.content, input.userName, speaker)}`,
+        ...(m.images && m.images.length > 0 ? { images: [...m.images] } : {}),
       })
+      continue
     }
+    const isNarrator = m.characterId === GROUP_NARRATOR_CHARACTER_ID
+    const char = input.members.find((c) => c.id === m.characterId)
+    const speaker = isNarrator ? '旁白' : (char?.name || '未知角色')
+    const charNameForMessage = isNarrator ? (memberNames || input.charNameForVars) : speaker
+    out.push({
+      role: 'assistant',
+      content: `【${speaker}】${replaceVariables(m.content, input.userName, charNameForMessage)}`,
+    })
   }
   return out
 }
