@@ -113,3 +113,124 @@ export function splitFreeReply(input: {
   }
   return { kind: 'segments', messages }
 }
+
+/**
+ * 单发言者（polling/mention）模式的角色名前缀剥离。
+ *
+ * 群聊历史消息按 `【角色名】内容` 渲染（见 groupContextBlocks.mapGroupHistoryMessages），
+ * 模型会模仿该格式；单发言者模式下这些前缀不属于正文，且前缀角色可能与计划发言者不一致
+ * （实测 Tofu 的消息行首写成 `【Aiko】`）。free 模式由 splitFreeReply 负责拆分，不使用本函数。
+ */
+export interface SpeakerPrefixStripResult {
+  text: string
+  /** 被剥离的前缀角色名（未剥离时为 null）。 */
+  prefixName: string | null
+  stripped: boolean
+}
+
+export interface SpeakerSegmentExtractResult {
+  text: string
+  /** 被丢弃的其他成员发言段名字（去重）。 */
+  droppedCharacters: string[]
+  hadForeignSegments: boolean
+}
+
+/**
+ * 单发言者模式：从模型回复中只保留“计划发言者”的段落。
+ *
+ * 实测单发言者请求（polling/mention/立即接话）偶发返回多角色分段（例如 Tofu 的回复里又写了
+ * `【Aiko】…`），若整条落盘会变成“Tofu 消息里包含 Aiko 的发言”，属于归属错误。
+ * 规则：按 `【角色名】` 分段；保留计划发言者的段与属于其的开场旁白；其他成员段丢弃并告警。
+ * 没有分段标记时仅清理残留的 `<角色名>` 标签。
+ */
+export function extractSpeakerSegments(
+  content: string,
+  speakerName: string,
+  memberNames: readonly string[] = [],
+): SpeakerSegmentExtractResult {
+  if (!content) return { text: content, droppedCharacters: [], hadForeignSegments: false }
+  const stripAngleTags = (value: string): string => {
+    let next = value
+    for (const name of memberNames) {
+      if (!name.trim()) continue
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      next = next.replace(new RegExp(`<\\s*/?\\s*${escaped}\\s*>`, 'gi'), '')
+    }
+    return next.trim()
+  }
+  const matches = [...content.matchAll(/【([^】\n]{1,30})】/g)]
+  if (matches.length === 0) {
+    return { text: stripAngleTags(content), droppedCharacters: [], hadForeignSegments: false }
+  }
+  const known = memberNames.map((name) => name.trim()).filter(Boolean)
+  const knownKeys = new Set(known.map((name) => name.toLowerCase()))
+  const speakerKey = speakerName.trim().toLowerCase()
+  const preamble = content.slice(0, matches[0].index).trim()
+  const segments: Array<{ name: string; body: string }> = []
+  for (let i = 0; i < matches.length; i += 1) {
+    const start = matches[i].index + matches[i][0].length
+    const end = i + 1 < matches.length ? matches[i + 1].index : content.length
+    segments.push({ name: matches[i][1].trim(), body: content.slice(start, end).trim() })
+  }
+  const kept: string[] = []
+  const dropped: string[] = []
+  for (const segment of segments) {
+    const key = segment.name.toLowerCase()
+    if (key === speakerKey) kept.push(segment.body)
+    else if (knownKeys.size === 0 || knownKeys.has(key)) dropped.push(segment.name)
+  }
+  // 开场旁白：单发言者请求中，第一个分段标记之前的叙述视为计划发言者自己的开场白，保留。
+  const text = stripAngleTags([preamble, ...kept].filter(Boolean).join('\n\n'))
+  return { text, droppedCharacters: [...new Set(dropped)], hadForeignSegments: dropped.length > 0 }
+}
+
+export function stripLeadingSpeakerPrefix(
+  content: string,
+  memberNames: readonly string[] = [],
+): SpeakerPrefixStripResult {
+  if (!content) return { text: content, prefixName: null, stripped: false }
+  let text = content.trimStart()
+  let prefixName: string | null = null
+  const known = memberNames.map((name) => name.trim()).filter(Boolean)
+  const isKnown = (name: string) => known.length === 0 || known.some((item) => item.toLowerCase() === name.toLowerCase())
+  for (let round = 0; round < 3; round += 1) {
+    const bracket = text.match(/^【([^】\n]{1,30})】\s*/)
+    if (bracket) {
+      prefixName = prefixName ?? bracket[1].trim()
+      text = text.slice(bracket[0].length)
+      continue
+    }
+    const angle = text.match(/^<\s*([A-Za-z][\w-]{0,30})\s*>\s*/)
+    if (angle && isKnown(angle[1])) {
+      prefixName = prefixName ?? angle[1]
+      text = text.slice(angle[0].length)
+      continue
+    }
+    const closing = text.match(/^<\/\s*([A-Za-z][\w-]{0,30})\s*>\s*/)
+    if (closing && isKnown(closing[1])) {
+      text = text.slice(closing[0].length)
+      continue
+    }
+    // 无分隔符的纯角色名前缀：`Aiko：…`（连同冒号一起剥离）
+    const plainColon = known.length > 0
+      ? text.match(new RegExp(`^(${known.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s*[:：]\\s*`, 'i'))
+      : null
+    if (plainColon) {
+      prefixName = prefixName ?? plainColon[1]
+      text = text.slice(plainColon[0].length)
+      continue
+    }
+    // `Tofu[[白纸符]]…` / `Aiko（…`：只剥离名字，保留后续标记交给正文清洗
+    const plain = known.length > 0
+      ? text.match(new RegExp(`^(${known.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?=\\[\\[|（|\\()`, 'i'))
+      : null
+    if (plain) {
+      prefixName = prefixName ?? plain[1]
+      text = text.slice(plain[0].length)
+      continue
+    }
+    break
+  }
+  return { text, prefixName, stripped: text !== content.trimStart() }
+}
+

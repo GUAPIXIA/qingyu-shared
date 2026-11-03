@@ -309,3 +309,73 @@ describe('mergeTailRepair：补尾合并与失败回退', () => {
     expect(r.notice).toBe('partial_network_output')
   })
 })
+
+describe('finalizeAssistantOutput：供应商安全/控制标记（2026-11-01 群聊实机问题）', () => {
+  it('整条只有未闭合 <ds_safety> 安全分类 → failed，不可落盘', () => {
+    const r = finalizeAssistantOutput({
+      rawText: '<ds_safety>[用户未成年]否\n[分类]其他\n[判定]内容为虚构日常闲聊，安全。',
+      finishReason: 'stop',
+    })
+    expect(r.status).toBe('failed')
+    expect(r.content).toBe('')
+  })
+
+  it('角色正文后追加 <ds_safety> → 只保留正文', () => {
+    const r = finalizeAssistantOutput({
+      rawText: `${LONG_COMPLETE}<ds_safety>[分类]其他\n[判定]安全。`,
+      finishReason: 'stop',
+    })
+    expect(r.status).toBe('complete')
+    expect(r.content).toBe(LONG_COMPLETE)
+  })
+
+  it('整条只有 <budget:token_budget> 控制标记 → failed', () => {
+    const r = finalizeAssistantOutput({
+      rawText: '<budget:token_budget>200000</budget:token_budget>',
+      finishReason: 'stop',
+    })
+    expect(r.status).toBe('failed')
+    expect(r.content).toBe('')
+  })
+
+  it('只有 @@末尾@@ 占位标记 → failed', () => {
+    const r = finalizeAssistantOutput({ rawText: '@@末尾@@', finishReason: 'stop' })
+    expect(r.status).toBe('failed')
+    expect(r.content).toBe('')
+  })
+
+  it('只有 <thought> 内心独白、无可见正文 → failed', () => {
+    const r = finalizeAssistantOutput({
+      rawText: '<thought>我是不是问得太直了。</thought>',
+      finishReason: 'stop',
+    })
+    expect(r.status).toBe('failed')
+    expect(r.content).toBe('')
+  })
+
+  it('正常短回复（<24 字）仍被接受', () => {
+    const r = finalizeAssistantOutput({ rawText: '嗯。', finishReason: 'stop' })
+    expect(r.status).toBe('complete')
+    expect(r.content).toBe('嗯。')
+  })
+
+  it('孤儿 </thought> + [[白纸符]] 占位 → 清理后保留可见正文', () => {
+    const r = finalizeAssistantOutput({
+      rawText: 'Tofu[[白纸符]]</thought>她看得见我就好了。',
+      finishReason: 'stop',
+    })
+    expect(r.status).toBe('complete')
+    expect(r.content).toBe('Tofu她看得见我就好了。')
+  })
+
+  it('正文实际是模型规划/自检（todo / Let me…）→ failed', () => {
+    const todo = finalizeAssistantOutput({
+      rawText: 'todo 当前发言角色是 Aiko，不是 Tofu！刚才那轮轮到 Tofu，但规则要求本轮只由 Aiko 回应。',
+      finishReason: 'stop',
+    })
+    expect(todo.status).toBe('failed')
+    expect(todo.content).toBe('')
+    const english = finalizeAssistantOutput({ rawText: "Let me just write Aiko's response.", finishReason: 'stop' })
+    expect(english.status).toBe('failed')
+  })
+})

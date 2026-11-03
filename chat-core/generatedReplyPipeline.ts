@@ -16,7 +16,7 @@
 
 import { finalizeAssistantOutput, type FinalizedAssistantOutput, type FinalizedStatus } from '../assistantOutputFinalizer'
 import type { AIFinishReason, GenerationTerminalResult, GenerationTerminationCause, RegexRule } from '../types'
-import { stripVendorThinking } from '../thoughtMarkup'
+import { stripProviderControlMarkup, stripVendorThinking } from '../thoughtMarkup'
 import { applyOutputRegexRules, collectStopStrings, truncateAtStop } from './regex'
 import {
   contentFilterPreservesBody,
@@ -56,8 +56,8 @@ export interface GeneratedReplyOutcome {
  * 无可用正文时 content 为空串（调用方按各自占位/错误分支处理）。
  */
 export async function runGeneratedReplyPipeline(opts: GeneratedReplyPipelineOptions): Promise<GeneratedReplyOutcome> {
-  // 1. 供应商推理残留清理（<thinking> 归一化等）
-  let text = stripVendorThinking(opts.rawText ?? '').trim()
+  // 1. 供应商推理/安全/控制标记清理（<thinking>、<ds_safety>、<budget:…>、@@末尾@@ 等）
+  let text = stripProviderControlMarkup(stripVendorThinking(opts.rawText ?? '')).trim()
 
   // 2. output 正则（两阶段 text + markdown）与 3. 停止字符串——先于收尾器执行，
   //    保证收尾器的结构检查针对最终落盘口径；每条消息只执行一次。

@@ -14,7 +14,7 @@
 
 import type { AIFinishReason, ResponsePolicy } from './types'
 import { analyzeTextClosure, countVisibleCharacters, isCompleteSentence } from './textMetrics'
-import { stripVendorThinking } from './thoughtMarkup'
+import { looksLikeModelPlanning, stripOrphanThoughtCloseTags, stripProviderControlMarkup, stripVendorThinking } from './thoughtMarkup'
 
 export type FinalizedStatus = 'complete' | 'recovered' | 'needs_tail_repair' | 'failed'
 
@@ -46,9 +46,9 @@ export interface FinalizeAssistantOutputInput {
   characterName?: string
 }
 
-/** 供应商推理标记 / 空标签清理：保留有效的 <thought> 块（心理描写是业务特性） */
+/** 供应商推理标记 / 安全控制标记 / 空标签清理：保留有效的 <thought> 块（心理描写是业务特性） */
 function stripVendorResidue(text: string): string {
-  return stripVendorThinking(text)
+  return stripOrphanThoughtCloseTags(stripProviderControlMarkup(stripVendorThinking(text)))
     // 空思考标签与空的成对标记
     .replace(/<thought>\s*<\/thought>/gi, '')
     // 供应商残留的流式哨兵
@@ -137,6 +137,21 @@ export function finalizeAssistantOutput(input: FinalizeAssistantOutputInput): Fi
       notice: finishReason === 'network_error' ? 'partial_network_output' : undefined,
       repairContext: buildRepairContext(raw),
       brokenTail: raw,
+      diagnostics: buildDiagnostics(''),
+    }
+  }
+
+  // 供应商控制/安全标记剥离后没有可见角色正文（例如整条只有 <ds_safety> 判定、
+  // 或只有 <thought> 内心独白），或正文其实是模型规划/自检（todo / Let me…），
+  // 都不得作为一条角色消息落盘。
+  const visibleBody = workingText
+    .replace(/<thought>[\s\S]*?<\/thought>/gi, '')
+    .replace(/<thought>[\s\S]*$/gi, '')
+  const visibleChars = countVisibleCharacters(visibleBody)
+  if (visibleChars === 0 || looksLikeModelPlanning(visibleBody)) {
+    return {
+      content: '',
+      status: 'failed',
       diagnostics: buildDiagnostics(''),
     }
   }
