@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { analyzeTextClosure, countVisibleCharacters, isCompleteSentence, tailSample, trimToSentenceBoundary } from '../textMetrics'
+import { analyzeTextClosure, closeDanglingMarks, countVisibleCharacters, isCompleteSentence, tailSample, trimToSentenceBoundary } from '../textMetrics'
 
 describe('textMetrics', () => {
   describe('countVisibleCharacters', () => {
@@ -90,6 +90,42 @@ describe('textMetrics', () => {
 
     it('空文本视为全部闭合', () => {
       expect(analyzeTextClosure('').unclosed).toBe(false)
+    })
+  })
+
+  describe('closeDanglingMarks（输入续写闭合兜底）', () => {
+    it('已闭合文本原样返回', () => {
+      const text = '她推开门。*环视四周*\n\n“谁在那？”'
+      expect(closeDanglingMarks(text)).toBe(text)
+    })
+
+    it('补齐未闭合的中文引号', () => {
+      const fixed = closeDanglingMarks('我清了清嗓子说：“那就来两把格斗吧，输的人请夜宵。')
+      expect(fixed).toBe('我清了清嗓子说：“那就来两把格斗吧，输的人请夜宵。”')
+      expect(analyzeTextClosure(fixed).balancedQuotes).toBe(true)
+    })
+
+    it('多开一个引号时补足缺口', () => {
+      expect(closeDanglingMarks('“甲：“乙。')).toBe('“甲：“乙。””')
+      expect(analyzeTextClosure(closeDanglingMarks('“甲：“乙。')).balancedQuotes).toBe(true)
+    })
+
+    it('补齐括号与书名号', () => {
+      expect(closeDanglingMarks('（她愣了一下')).toBe('（她愣了一下）')
+      expect(closeDanglingMarks('见《夜航船')).toBe('见《夜航船》')
+    })
+
+    it('补齐奇数星号', () => {
+      expect(closeDanglingMarks('*动作只写了一半')).toBe('*动作只写了一半*')
+    })
+
+    it('末尾只剩开符号时删掉悬空开符号，不补空对', () => {
+      expect(closeDanglingMarks('她说：“')).toBe('她说：')
+    })
+
+    it('幂等：补过之后再次调用不再变化', () => {
+      const once = closeDanglingMarks('我说：“走吧。')
+      expect(closeDanglingMarks(once)).toBe(once)
     })
   })
 

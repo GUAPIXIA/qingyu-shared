@@ -74,6 +74,36 @@ const PAIRED_MARKS: Array<[string, string]> = [
   ['《', '》'],
 ]
 
+function countOccurrences(text: string, token: string): number {
+  return token ? text.split(token).length - 1 : 0
+}
+
+/**
+ * 确定性闭合兜底：补齐悬空的开符号（引号/括号/书名号）与奇数星号。
+ *
+ * 输入续写把结果直接写进输入框，模型常在台词中途停笔（如 `…清了清嗓子说：“那就来吧。`），
+ * `isCompleteSentence` 只看句末标点，会把这类未闭合文本当作完整句放行。
+ * 这里不调用模型，直接按缺口补闭合符；末尾只剩开符号时删掉悬空开符号，避免补出空标记对。
+ * 幂等：已闭合文本原样返回。
+ */
+export function closeDanglingMarks(text: string): string {
+  if (!text) return text
+  let out = text
+  for (const [open, close] of PAIRED_MARKS) {
+    let openCount = countOccurrences(out, open)
+    const closeCount = countOccurrences(out, close)
+    // 悬空开符号后没有内容：删掉它，不补空对
+    while (openCount > closeCount && out.trimEnd().endsWith(open)) {
+      const trimmed = out.trimEnd()
+      out = trimmed.slice(0, -open.length).trimEnd()
+      openCount--
+    }
+    if (openCount > closeCount) out += close.repeat(openCount - closeCount)
+  }
+  if (countOccurrences(out, '*') % 2 === 1) out += '*'
+  return out
+}
+
 /** 正文尾部采样长度（观测记录用，避免落盘完整正文） */
 export const TAIL_SAMPLE_MAX_CHARS = 80
 

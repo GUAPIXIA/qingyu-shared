@@ -240,10 +240,20 @@ export type CharacterImportConflictPolicy = 'copy' | 'overwrite'
 /** UEX-P1-17：单张导入处理结果——新导入 / 内容相同跳过 / 同名副本 / 显式覆盖 */
 export type CharacterImportOutcome = 'imported' | 'skippedIdentical' | 'copied' | 'overwritten'
 
+/**
+ * 角色保存选项。
+ * `touchUpdatedAt`（默认 true）：是否把 updatedAt 刷新为当前时间。
+ * 纯展示类字段（如封面毛玻璃开关）的局部更新必须传 false——updatedAt 是角色卡列表的
+ * 排序键（「最近更新」），刷新它会让卡片在点击开关的瞬间跳到列表最前面。
+ */
+export interface CharacterSaveOptions {
+  touchUpdatedAt?: boolean
+}
+
 export interface CharacterAPI {
   list(): Promise<Character[]>
   get(id: string): Promise<Character | null>
-  save(character: Character): Promise<void>
+  save(character: Character, options?: CharacterSaveOptions): Promise<void>
   delete(id: string): Promise<void>
   /** UEX-P1-17：conflict 为同名冲突策略（默认另存副本）；相同卡跳过时无 character，仅回传 outcome/note 明细 */
   importPng(conflict?: CharacterImportConflictPolicy, sourcePath?: string): Promise<{ success: boolean; character?: Character; error?: string; canceled?: boolean; cardExtras?: { regexCount: number; quickReplyCount: number; skipped?: string[] }; lorebookSuggestions?: LorebookSuggestion[]; outcome?: CharacterImportOutcome; note?: string }>
@@ -519,8 +529,12 @@ export interface GroupChatAPI {
 
 // ===================== TTS 接口 =====================
 export interface TTSAPI {
-  /** 朗读。openai provider 返回 audioBase64（渲染进程播放）；system 本地引擎无返回 */
-  speak(text: string, options: TTSOptions & { model?: string; apiKey?: string; baseUrl?: string; proxy?: string }): Promise<{ success: boolean; audioBase64?: string; error?: string }>
+  /**
+   * 朗读。openai / xiaomi / deepseek 等网络 provider 返回 audioBase64（渲染进程播放）。
+   * audioMime 标明音频 MIME：openai / xiaomi 为 mp3，DeepSeek 为 wav；缺省按 mp3 处理。
+   * system 本地引擎无返回。
+   */
+  speak(text: string, options: TTSOptions & { model?: string; apiKey?: string; baseUrl?: string; proxy?: string }): Promise<{ success: boolean; audioBase64?: string; audioMime?: string; error?: string }>
   stop(): Promise<void>
   pause(): Promise<void>
   resume(): Promise<void>
